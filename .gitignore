@@ -1,0 +1,10 @@
+node_modules/
+dist/
+data/
+.env
+logs/
+deploy.py
+deploy_popfit2.py
+test_ssh.py
+*.db
+.claude/
