@@ -28,6 +28,7 @@ export interface MealEntry {
   carbs_g: number;
   fat_g: number;
   notes?: string;
+  symptoms?: string;
   loggedAt: string;
 }
 

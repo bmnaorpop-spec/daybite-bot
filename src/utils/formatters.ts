@@ -14,6 +14,9 @@ export function formatMealEntry(entry: MealEntry): string {
   if (entry.notes) {
     text += `\n   📝 ${entry.notes}`;
   }
+  if (entry.symptoms) {
+    text += `\n   💭 הרגשה לאחר: ${entry.symptoms}`;
+  }
   return text;
 }
 

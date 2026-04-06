@@ -51,6 +51,7 @@ export function buildSystemPrompt(user: UserProfile): string {
 3. כאשר מתבקש לחלץ נתוני אוכל — החזר JSON בלבד, ללא טקסט נוסף
 4. הערכות קלוריות צריכות להיות ריאליות — דגל אם ערך נראה חריג
 5. אל תמציא נתונים תזונתיים — אם אינך בטוח, ציין זאת
+6. אם ישנם נתוני תסמינים (הרגשה לאחר ארוחות), שים לב לדפוסים וציין אותם — למשל: "בכל פעם שאכלת X, דיווחת על Y"
 `.trim();
 }
 
@@ -157,7 +158,11 @@ export async function generateMealPlan(
   const totalCarbs = todayLog.reduce((sum, e) => sum + e.carbs_g, 0);
   const totalFat = todayLog.reduce((sum, e) => sum + e.fat_g, 0);
 
-  const logSummary = todayLog.map((e) => `- ${e.timeOfDay}: ${e.description} (${e.calories} קק״ל)`).join("\n");
+  const logSummary = todayLog.map((e) => {
+    let line = `- ${e.timeOfDay}: ${e.description} (${e.calories} קק״ל)`;
+    if (e.symptoms) line += ` — הרגשה לאחר: ${e.symptoms}`;
+    return line;
+  }).join("\n");
 
   const planPrompt = `
 צור תוכנית ארוחות להמשך היום עבור ${user.name}.

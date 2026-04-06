@@ -8,16 +8,16 @@ import {
 } from "../utils/formatters";
 import { MealEntry } from "../types";
 
-export async function handleFoodLog(ctx: Context, userMessage: string): Promise<void> {
+export async function handleFoodLog(ctx: Context, userMessage: string): Promise<string | null> {
   const telegramId = ctx.from?.id;
-  if (!telegramId) return;
+  if (!telegramId) return null;
 
   const user = getUser(telegramId);
   if (!user) {
     await ctx.reply(
       "לא מצאתי את הפרופיל שלך. אנא הירשם תחילה עם /התחל"
     );
-    return;
+    return null;
   }
 
   await ctx.sendChatAction("typing");
@@ -30,7 +30,7 @@ export async function handleFoodLog(ctx: Context, userMessage: string): Promise<
     await ctx.reply(
       "סליחה, נתקלתי בבעיה זמנית. נסה שוב בעוד רגע 🙏"
     );
-    return;
+    return null;
   }
 
   if (!entries || entries.length === 0) {
@@ -38,11 +38,14 @@ export async function handleFoodLog(ctx: Context, userMessage: string): Promise<
       "לא הצלחתי להבין מה אכלת — תוכל לפרט קצת יותר? 🤔\n\n" +
       "לדוגמה: \"אכלתי בוקר שתי ביצים עם לחם ואחר הצהריים שניצל עם אורז\""
     );
-    return;
+    return null;
   }
 
   // Check for unrealistic calorie estimates
   const highCalorieEntries = entries.filter((e) => e.calories > 3000);
+
+  // All entries from the same parse call share the same loggedAt
+  const loggedAt = entries[0].loggedAt;
 
   // Save all entries to DB
   for (const entry of entries) {
@@ -62,6 +65,16 @@ export async function handleFoodLog(ctx: Context, userMessage: string): Promise<
       [
         Markup.button.callback("🍽️ תכנן המשך יום", "show_plan"),
       ],
+      [
+        Markup.button.callback("✅ רגיל", "symptom_ok"),
+        Markup.button.callback("🫃 נפיחות", "symptom_bloating"),
+        Markup.button.callback("🔥 צרבת", "symptom_heartburn"),
+      ],
+      [
+        Markup.button.callback("😴 עייפות", "symptom_fatigue"),
+        Markup.button.callback("✏️ אחר", "symptom_other"),
+        Markup.button.callback("⏭️ דלג", "symptom_skip"),
+      ],
     ]),
   });
 
@@ -71,6 +84,8 @@ export async function handleFoodLog(ctx: Context, userMessage: string): Promise<
       parse_mode: "Markdown",
     });
   }
+
+  return loggedAt;
 }
 
 export async function logCommand(ctx: Context): Promise<void> {
