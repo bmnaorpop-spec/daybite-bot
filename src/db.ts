@@ -2,6 +2,7 @@ import { DatabaseSync } from "node:sqlite";
 import path from "path";
 import fs from "fs";
 import { UserProfile, MealEntry, Message } from "./types";
+import { runMigrations } from "./migrations";
 
 const DATA_DIR = path.join(process.cwd(), "data");
 const DB_PATH = path.join(DATA_DIR, "daybite.db");
@@ -12,49 +13,8 @@ if (!fs.existsSync(DATA_DIR)) {
 
 const db = new DatabaseSync(DB_PATH);
 
-// Migrate existing DB if needed
-try {
-  db.exec(`ALTER TABLE users ADD COLUMN customPersonality TEXT`);
-} catch (_) { /* column already exists */ }
-
-// Create tables
-db.exec(`
-  CREATE TABLE IF NOT EXISTS users (
-    telegramId INTEGER PRIMARY KEY,
-    name TEXT NOT NULL,
-    dietType TEXT NOT NULL,
-    calorieGoal INTEGER,
-    customDietRules TEXT,
-    goal TEXT NOT NULL,
-    customPersonality TEXT,
-    botPersonality TEXT NOT NULL,
-    currentDayLog TEXT NOT NULL DEFAULT '[]',
-    lastLogDate TEXT NOT NULL,
-    createdAt TEXT NOT NULL
-  );
-
-  CREATE TABLE IF NOT EXISTS meal_logs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    telegramId INTEGER NOT NULL,
-    date TEXT NOT NULL,
-    description TEXT NOT NULL,
-    timeOfDay TEXT NOT NULL,
-    calories REAL NOT NULL,
-    protein_g REAL NOT NULL,
-    carbs_g REAL NOT NULL,
-    fat_g REAL NOT NULL,
-    notes TEXT,
-    loggedAt TEXT NOT NULL
-  );
-
-  CREATE TABLE IF NOT EXISTS conversation_history (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    telegramId INTEGER NOT NULL,
-    role TEXT NOT NULL,
-    content TEXT NOT NULL,
-    createdAt TEXT NOT NULL
-  );
-`);
+// Run all pending migrations (idempotent, safe to call on every startup)
+runMigrations(db);
 
 export function getToday(): string {
   return new Date().toISOString().split("T")[0];
@@ -168,8 +128,8 @@ export function appendMealLog(telegramId: number, entry: MealEntry): void {
   const today = getToday();
 
   db.prepare(`
-    INSERT INTO meal_logs (telegramId, date, description, timeOfDay, calories, protein_g, carbs_g, fat_g, notes, loggedAt)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO meal_logs (telegramId, date, description, timeOfDay, calories, protein_g, carbs_g, fat_g, notes, symptoms, loggedAt)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     telegramId,
     today,
@@ -180,6 +140,7 @@ export function appendMealLog(telegramId: number, entry: MealEntry): void {
     entry.carbs_g,
     entry.fat_g,
     entry.notes ?? null,
+    entry.symptoms ?? null,
     entry.loggedAt
   );
 
@@ -190,6 +151,29 @@ export function appendMealLog(telegramId: number, entry: MealEntry): void {
     db.prepare("UPDATE users SET currentDayLog = ?, lastLogDate = ? WHERE telegramId = ?").run(
       JSON.stringify(log),
       today,
+      telegramId
+    );
+  }
+}
+
+export function updateMealSymptoms(
+  telegramId: number,
+  loggedAt: string,
+  symptoms: string
+): void {
+  db.prepare(
+    "UPDATE meal_logs SET symptoms = ? WHERE telegramId = ? AND loggedAt = ?"
+  ).run(symptoms, telegramId, loggedAt);
+
+  // Keep currentDayLog in sync
+  const row = db.prepare("SELECT currentDayLog FROM users WHERE telegramId = ?").get(telegramId) as any;
+  if (row) {
+    const log: MealEntry[] = JSON.parse(row.currentDayLog || "[]");
+    const updated = log.map((e) =>
+      e.loggedAt === loggedAt ? { ...e, symptoms } : e
+    );
+    db.prepare("UPDATE users SET currentDayLog = ? WHERE telegramId = ?").run(
+      JSON.stringify(updated),
       telegramId
     );
   }
@@ -208,6 +192,7 @@ export function getMealLogsForDay(telegramId: number, date: string): MealEntry[]
     carbs_g: r.carbs_g as number,
     fat_g: r.fat_g as number,
     notes: r.notes != null ? (r.notes as string) : undefined,
+    symptoms: r.symptoms != null ? (r.symptoms as string) : undefined,
     loggedAt: r.loggedAt as string,
   }));
 }

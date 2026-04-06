@@ -2,10 +2,10 @@ module.exports = {
   apps: [
     {
       name: "daybite-bot",
-      script: "src/index.ts",
+      script: "dist/index.js",
       interpreter: "node",
-      interpreter_args: "--experimental-sqlite -r ts-node/register",
-      cwd: "C:\\Users\\BARAK NEW\\Desktop\\daybite-bot",
+      interpreter_args: "--experimental-sqlite",
+      cwd: "/home/pop/daybite-bot",
       watch: false,
       autorestart: true,
       max_restarts: 10,

@@ -3,7 +3,7 @@ import path from "path";
 dotenv.config({ path: path.resolve(process.cwd(), ".env"), override: true });
 import { Telegraf, Scenes, session } from "telegraf";
 import { onboardingScene } from "./scenes/onboarding";
-import { logCommand, handleFoodLog } from "./commands/log";
+import { logCommand, handleFoodLog, sendSymptomsPrompt } from "./commands/log";
 import { summaryCommand } from "./commands/summary";
 import { planCommand, handlePlanRefinement } from "./commands/plan";
 import {
@@ -14,7 +14,7 @@ import {
 } from "./commands/settings";
 import { resetCommand, handleResetCallback } from "./commands/reset";
 import { helpCommand } from "./commands/help";
-import { closeDb, getUser } from "./db";
+import { closeDb, getUser, updateMealSymptoms } from "./db";
 
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
@@ -38,6 +38,20 @@ bot.use(stage.middleware());
 
 // Track users who are refining meal plans
 const awaitingPlanRefinement = new Set<number>();
+
+// Track users awaiting symptoms feedback: telegramId -> loggedAt (batch timestamp)
+const pendingSymptomsFeedback = new Map<number, string>();
+
+// Track users who chose "אחר" and need to type their symptom
+const awaitingSymptomOtherText = new Set<number>();
+
+// Symptoms label map
+const SYMPTOMS_MAP: Record<string, string> = {
+  symptom_ok: "רגיל",
+  symptom_bloating: "נפיחות",
+  symptom_heartburn: "צרבת",
+  symptom_fatigue: "עייפות",
+};
 
 // ─── Commands ───────────────────────────────────────────────────────────────
 
@@ -153,6 +167,42 @@ bot.action("customize_plan", async (ctx) => {
   );
 });
 
+// ─── Symptoms Callbacks ───────────────────────────────────────────────────────
+
+bot.action("symptom_skip", async (ctx) => {
+  const telegramId = ctx.from?.id;
+  if (!telegramId) return;
+  await ctx.answerCbQuery();
+  pendingSymptomsFeedback.delete(telegramId);
+  awaitingSymptomOtherText.delete(telegramId);
+});
+
+bot.action("symptom_other", async (ctx) => {
+  const telegramId = ctx.from?.id;
+  if (!telegramId) return;
+  await ctx.answerCbQuery();
+  if (!pendingSymptomsFeedback.has(telegramId)) return;
+  awaitingSymptomOtherText.add(telegramId);
+  await ctx.reply("✏️ ספר לי — איך הרגשת?");
+});
+
+bot.action(/^symptom_(ok|bloating|heartburn|fatigue)$/, async (ctx) => {
+  const telegramId = ctx.from?.id;
+  if (!telegramId) return;
+  await ctx.answerCbQuery();
+
+  const data = (ctx.callbackQuery as any).data as string;
+  const loggedAt = pendingSymptomsFeedback.get(telegramId);
+  if (!loggedAt) return;
+
+  const symptoms = SYMPTOMS_MAP[data];
+  if (symptoms) {
+    updateMealSymptoms(telegramId, loggedAt, symptoms);
+    pendingSymptomsFeedback.delete(telegramId);
+    await ctx.reply(`✅ תועד — הרגשה: *${symptoms}*`, { parse_mode: "Markdown" });
+  }
+});
+
 // Settings callbacks
 bot.action(/^settings_/, async (ctx) => {
   const data = (ctx.callbackQuery as any).data as string;
@@ -194,6 +244,18 @@ bot.on("text", async (ctx) => {
     return;
   }
 
+  // Check if user is typing a free-text symptom ("אחר")
+  if (awaitingSymptomOtherText.has(telegramId)) {
+    awaitingSymptomOtherText.delete(telegramId);
+    const loggedAt = pendingSymptomsFeedback.get(telegramId);
+    if (loggedAt) {
+      updateMealSymptoms(telegramId, loggedAt, text);
+      pendingSymptomsFeedback.delete(telegramId);
+      await ctx.reply(`✅ תועד — הרגשה: *${text}*`, { parse_mode: "Markdown" });
+    }
+    return;
+  }
+
   // Check if user is in settings text-input mode
   const settingsState = getEditingState(telegramId);
   if (settingsState?.awaitingText) {
@@ -209,7 +271,11 @@ bot.on("text", async (ctx) => {
   }
 
   // Default: treat as food log
-  await handleFoodLog(ctx, text);
+  const loggedAt = await handleFoodLog(ctx, text);
+  if (loggedAt) {
+    pendingSymptomsFeedback.set(telegramId, loggedAt);
+    await sendSymptomsPrompt(ctx);
+  }
 });
 
 // ─── Error Handler ───────────────────────────────────────────────────────────
@@ -217,6 +283,19 @@ bot.on("text", async (ctx) => {
 bot.catch((err: any, ctx) => {
   console.error(`Bot error for update ${ctx.updateType}:`, err);
 });
+
+// ─── Graceful Shutdown ────────────────────────────────────────────────────────
+
+const shutdown = async (signal: string): Promise<void> => {
+  console.log(`\n🛑 מכבה את הבוט (${signal})...`);
+  await bot.stop(signal);
+  closeDb();
+  console.log("✅ הבסיס נתונים נסגר בצורה תקינה.");
+  process.exit(0);
+};
+
+process.once("SIGINT", () => shutdown("SIGINT").catch(console.error));
+process.once("SIGTERM", () => shutdown("SIGTERM").catch(console.error));
 
 // ─── Startup ─────────────────────────────────────────────────────────────────
 
@@ -237,21 +316,6 @@ async function main() {
   } catch (err) {
     console.warn("⚠️ לא הצלחתי לעדכן פקודות:", err);
   }
-
-  // Graceful shutdown
-  process.once("SIGINT", () => {
-    console.log("\n🛑 מכבה את הבוט...");
-    bot.stop("SIGINT");
-    closeDb();
-    console.log("✅ הבסיס נתונים נסגר בצורה תקינה.");
-  });
-
-  process.once("SIGTERM", () => {
-    console.log("\n🛑 מכבה את הבוט...");
-    bot.stop("SIGTERM");
-    closeDb();
-    console.log("✅ הבסיס נתונים נסגר בצורה תקינה.");
-  });
 
   bot.launch();
   console.log("✅ DayBite Bot פועל! שלח /start בטלגרם כדי להתחיל.");
