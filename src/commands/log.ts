@@ -7,6 +7,10 @@ import {
 } from "../utils/formatters";
 import { MealEntry } from "../types";
 
+// Maps telegramId → loggedAt timestamp of the last batch, so the symptom
+// callback can find the right rows to update.
+export const pendingSymptomTimestamp = new Map<number, string>();
+
 export async function handleFoodLog(ctx: Context, userMessage: string): Promise<void> {
   const telegramId = ctx.from?.id;
   if (!telegramId) return;
@@ -67,6 +71,28 @@ export async function handleFoodLog(ctx: Context, userMessage: string): Promise<
       parse_mode: "Markdown",
     });
   }
+
+  // Ask how the user felt after eating (symptom tracking)
+  const batchTimestamp = entries[0].loggedAt;
+  pendingSymptomTimestamp.set(telegramId, batchTimestamp);
+
+  await ctx.reply(
+    "🌡️ *איך הרגשת 1–2 שעות אחרי הארוחה?*\n_(ניתן לדלג — פשוט התעלם מהשאלה)_",
+    {
+      parse_mode: "Markdown",
+      ...Markup.inlineKeyboard([
+        [
+          Markup.button.callback("✅ רגיל", "symptom_normal"),
+          Markup.button.callback("😮‍💨 נפיחות", "symptom_bloating"),
+        ],
+        [
+          Markup.button.callback("🔥 צרבת", "symptom_heartburn"),
+          Markup.button.callback("😴 עייפות", "symptom_fatigue"),
+        ],
+        [Markup.button.callback("🔸 אחר", "symptom_other")],
+      ]),
+    }
+  );
 }
 
 export async function logCommand(ctx: Context): Promise<void> {

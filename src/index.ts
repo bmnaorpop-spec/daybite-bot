@@ -3,7 +3,7 @@ import path from "path";
 dotenv.config({ path: path.resolve(process.cwd(), ".env"), override: true });
 import { Telegraf, Scenes, session } from "telegraf";
 import { onboardingScene } from "./scenes/onboarding";
-import { logCommand, handleFoodLog } from "./commands/log";
+import { logCommand, handleFoodLog, pendingSymptomTimestamp } from "./commands/log";
 import { summaryCommand } from "./commands/summary";
 import { planCommand, handlePlanRefinement } from "./commands/plan";
 import {
@@ -14,7 +14,8 @@ import {
 } from "./commands/settings";
 import { resetCommand, handleResetCallback } from "./commands/reset";
 import { helpCommand } from "./commands/help";
-import { closeDb, getUser } from "./db";
+import { closeDb, getUser, updateMealSymptomByLoggedAt } from "./db";
+import { MealSymptom } from "./types";
 
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
@@ -134,6 +135,48 @@ bot.action("save_plan", async (ctx) => {
 bot.action("replan", async (ctx) => {
   await ctx.answerCbQuery();
   await planCommand(ctx);
+});
+
+// Symptom tracking callbacks
+const symptomKeyMap: Record<string, MealSymptom> = {
+  symptom_normal: "רגיל",
+  symptom_bloating: "נפיחות",
+  symptom_heartburn: "צרבת",
+  symptom_fatigue: "עייפות",
+  symptom_other: "אחר",
+};
+
+bot.action(/^symptom_/, async (ctx) => {
+  const telegramId = ctx.from?.id;
+  if (!telegramId) return;
+
+  const data = (ctx.callbackQuery as any).data as string;
+  const symptom = symptomKeyMap[data];
+  if (!symptom) return;
+
+  const loggedAt = pendingSymptomTimestamp.get(telegramId);
+  if (!loggedAt) {
+    await ctx.answerCbQuery("לא מצאתי ארוחה לעדכון.");
+    return;
+  }
+
+  pendingSymptomTimestamp.delete(telegramId);
+  updateMealSymptomByLoggedAt(telegramId, loggedAt, symptom);
+
+  const emojiMap: Record<MealSymptom, string> = {
+    "רגיל": "✅",
+    "נפיחות": "😮‍💨",
+    "צרבת": "🔥",
+    "עייפות": "😴",
+    "אחר": "🔸",
+  };
+
+  await ctx.answerCbQuery(`${emojiMap[symptom]} ${symptom} — נרשם!`);
+  await ctx.editMessageReplyMarkup(undefined);
+  await ctx.reply(
+    `${emojiMap[symptom]} *תחושה לאחר הארוחה: ${symptom}*\n\nתודה! עם הזמן אוכל לזהות דפוסים בתגובות שלך לאוכל מסוים. 🔍`,
+    { parse_mode: "Markdown" }
+  );
 });
 
 bot.action("customize_plan", async (ctx) => {

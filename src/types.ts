@@ -20,6 +20,8 @@ export type BotPersonality =
   | "no_nonsense"
   | "custom";
 
+export type MealSymptom = "רגיל" | "נפיחות" | "צרבת" | "עייפות" | "אחר";
+
 export interface MealEntry {
   description: string;
   timeOfDay: "בוקר" | "צהריים" | "ערב" | "נשנוש";
@@ -29,6 +31,8 @@ export interface MealEntry {
   fat_g: number;
   notes?: string;
   loggedAt: string;
+  symptom?: MealSymptom;
+  symptomLoggedAt?: string;
 }
 
 export interface Message {

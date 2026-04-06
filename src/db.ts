@@ -1,7 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
 import path from "path";
 import fs from "fs";
-import { UserProfile, MealEntry, Message } from "./types";
+import { UserProfile, MealEntry, MealSymptom, Message } from "./types";
 
 const DATA_DIR = path.join(process.cwd(), "data");
 const DB_PATH = path.join(DATA_DIR, "daybite.db");
@@ -12,10 +12,47 @@ if (!fs.existsSync(DATA_DIR)) {
 
 const db = new DatabaseSync(DB_PATH);
 
-// Migrate existing DB if needed
-try {
-  db.exec(`ALTER TABLE users ADD COLUMN customPersonality TEXT`);
-} catch (_) { /* column already exists */ }
+// Inline migrations for backwards compatibility
+try { db.exec(`ALTER TABLE users ADD COLUMN customPersonality TEXT`); } catch (_) { /* already exists */ }
+
+// Migration runner — applies numbered SQL files from migrations/ dir
+function runMigrations(): void {
+  db.exec(`CREATE TABLE IF NOT EXISTS _migrations (name TEXT PRIMARY KEY, appliedAt TEXT)`);
+
+  const migrationsDir = path.join(process.cwd(), "migrations");
+  if (!fs.existsSync(migrationsDir)) return;
+
+  const files = fs.readdirSync(migrationsDir)
+    .filter((f) => f.endsWith(".sql"))
+    .sort();
+
+  for (const file of files) {
+    const alreadyApplied = db.prepare("SELECT name FROM _migrations WHERE name = ?").get(file);
+    if (alreadyApplied) continue;
+
+    const sql = fs.readFileSync(path.join(migrationsDir, file), "utf8");
+    const statements = sql.split(";").map((s) => s.trim()).filter((s) => s.length > 0);
+
+    let success = true;
+    for (const stmt of statements) {
+      try {
+        db.exec(stmt + ";");
+      } catch (err: any) {
+        if (err?.message?.includes("duplicate column") || err?.message?.includes("already exists")) {
+          continue; // idempotent — skip
+        }
+        console.error(`Migration ${file} failed:`, err?.message, "\nStatement:", stmt);
+        success = false;
+        break;
+      }
+    }
+
+    if (success) {
+      db.prepare("INSERT INTO _migrations (name, appliedAt) VALUES (?, ?)").run(file, new Date().toISOString());
+      console.log(`✅ Migration applied: ${file}`);
+    }
+  }
+}
 
 // Create tables
 db.exec(`
@@ -44,7 +81,9 @@ db.exec(`
     carbs_g REAL NOT NULL,
     fat_g REAL NOT NULL,
     notes TEXT,
-    loggedAt TEXT NOT NULL
+    loggedAt TEXT NOT NULL,
+    symptom TEXT,
+    symptomLoggedAt TEXT
   );
 
   CREATE TABLE IF NOT EXISTS conversation_history (
@@ -55,6 +94,8 @@ db.exec(`
     createdAt TEXT NOT NULL
   );
 `);
+
+runMigrations();
 
 export function getToday(): string {
   return new Date().toISOString().split("T")[0];
@@ -168,8 +209,8 @@ export function appendMealLog(telegramId: number, entry: MealEntry): void {
   const today = getToday();
 
   db.prepare(`
-    INSERT INTO meal_logs (telegramId, date, description, timeOfDay, calories, protein_g, carbs_g, fat_g, notes, loggedAt)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO meal_logs (telegramId, date, description, timeOfDay, calories, protein_g, carbs_g, fat_g, notes, loggedAt, symptom, symptomLoggedAt)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     telegramId,
     today,
@@ -180,7 +221,9 @@ export function appendMealLog(telegramId: number, entry: MealEntry): void {
     entry.carbs_g,
     entry.fat_g,
     entry.notes ?? null,
-    entry.loggedAt
+    entry.loggedAt,
+    entry.symptom ?? null,
+    entry.symptomLoggedAt ?? null
   );
 
   const row = db.prepare("SELECT currentDayLog FROM users WHERE telegramId = ?").get(telegramId) as any;
@@ -209,6 +252,8 @@ export function getMealLogsForDay(telegramId: number, date: string): MealEntry[]
     fat_g: r.fat_g as number,
     notes: r.notes != null ? (r.notes as string) : undefined,
     loggedAt: r.loggedAt as string,
+    symptom: r.symptom != null ? (r.symptom as any) : undefined,
+    symptomLoggedAt: r.symptomLoggedAt != null ? (r.symptomLoggedAt as string) : undefined,
   }));
 }
 
@@ -245,6 +290,31 @@ export function appendConversationMessage(
         SELECT id FROM conversation_history WHERE telegramId = ? ORDER BY id ASC LIMIT ?
       )
     `).run(telegramId, telegramId, count - 10);
+  }
+}
+
+export function updateMealSymptomByLoggedAt(
+  telegramId: number,
+  loggedAt: string,
+  symptom: MealSymptom
+): void {
+  const now = new Date().toISOString();
+
+  db.prepare(
+    "UPDATE meal_logs SET symptom = ?, symptomLoggedAt = ? WHERE telegramId = ? AND loggedAt = ?"
+  ).run(symptom, now, telegramId, loggedAt);
+
+  // Mirror into the currentDayLog JSON blob
+  const row = db.prepare("SELECT currentDayLog FROM users WHERE telegramId = ?").get(telegramId) as any;
+  if (row) {
+    const log: MealEntry[] = JSON.parse(row.currentDayLog || "[]");
+    const updated = log.map((e) =>
+      e.loggedAt === loggedAt ? { ...e, symptom, symptomLoggedAt: now } : e
+    );
+    db.prepare("UPDATE users SET currentDayLog = ? WHERE telegramId = ?").run(
+      JSON.stringify(updated),
+      telegramId
+    );
   }
 }
 

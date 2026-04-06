@@ -5,7 +5,7 @@ module.exports = {
       script: "src/index.ts",
       interpreter: "node",
       interpreter_args: "--experimental-sqlite -r ts-node/register",
-      cwd: "C:\\Users\\BARAK NEW\\Desktop\\daybite-bot",
+      cwd: "/home/pop/daybite-bot",
       watch: false,
       autorestart: true,
       max_restarts: 10,

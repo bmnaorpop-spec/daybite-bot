@@ -9,10 +9,21 @@ export function formatMealEntry(entry: MealEntry): string {
   };
 
   const emoji = timeEmoji[entry.timeOfDay] || "🍽️";
+  const symptomEmoji: Record<string, string> = {
+    "רגיל": "✅",
+    "נפיחות": "😮‍💨",
+    "צרבת": "🔥",
+    "עייפות": "😴",
+    "אחר": "🔸",
+  };
+
   let text = `${emoji} *${entry.timeOfDay}* — ${entry.description}\n`;
   text += `   🔥 ${Math.round(entry.calories)} קק״ל | 💪 חלבון: ${Math.round(entry.protein_g)}g | 🌾 פחמימות: ${Math.round(entry.carbs_g)}g | 🥑 שומן: ${Math.round(entry.fat_g)}g`;
   if (entry.notes) {
     text += `\n   📝 ${entry.notes}`;
+  }
+  if (entry.symptom && entry.symptom !== "רגיל") {
+    text += `\n   🌡️ תחושה לאחר: ${symptomEmoji[entry.symptom] ?? "🔸"} ${entry.symptom}`;
   }
   return text;
 }
@@ -49,6 +60,14 @@ export function formatDailySummary(user: UserProfile, log: MealEntry[]): string 
       text += `✅ נותרו: ${Math.round(remaining)} קק״ל (${percentage}% מהיעד)\n`;
     } else {
       text += `⚠️ חרגת מהיעד ב-${Math.round(Math.abs(remaining))} קק״ל\n`;
+    }
+  }
+
+  const symptomsLogged = log.filter((e) => e.symptom && e.symptom !== "רגיל");
+  if (symptomsLogged.length > 0) {
+    text += `\n🌡️ *תחושות לאחר ארוחות:*\n`;
+    for (const e of symptomsLogged) {
+      text += `• ${e.timeOfDay} (${e.description}): ${e.symptom}\n`;
     }
   }
 
