@@ -51,8 +51,10 @@ export async function handleFoodLog(ctx: Context, userMessage: string): Promise<
     appendMealLog(telegramId, entry);
   }
 
-  // Format and send response
-  const formattedText = formatLoggedMeals(entries);
+  // Send confirmation + symptom question in ONE message
+  const formattedText =
+    formatLoggedMeals(entries) +
+    "\n\n💭 *איך הרגשת 1–2 שעות לאחר מכן?* _(אופציונלי)_";
 
   await ctx.reply(formattedText, {
     parse_mode: "Markdown",
@@ -60,6 +62,16 @@ export async function handleFoodLog(ctx: Context, userMessage: string): Promise<
       [
         Markup.button.callback("📊 סיכום יומי", "show_summary"),
         Markup.button.callback("🍽️ תכנן המשך יום", "show_plan"),
+      ],
+      [
+        Markup.button.callback("✅ רגיל", "symptom_ok"),
+        Markup.button.callback("🫃 נפיחות", "symptom_bloating"),
+        Markup.button.callback("🔥 צרבת", "symptom_heartburn"),
+      ],
+      [
+        Markup.button.callback("😴 עייפות", "symptom_fatigue"),
+        Markup.button.callback("✏️ אחר", "symptom_other"),
+        Markup.button.callback("⏭️ דלג", "symptom_skip"),
       ],
     ]),
   });
@@ -72,29 +84,6 @@ export async function handleFoodLog(ctx: Context, userMessage: string): Promise<
   }
 
   return loggedAt;
-}
-
-export async function sendSymptomsPrompt(ctx: Context): Promise<void> {
-  await ctx.reply(
-    "💭 *איך הרגשת 1–2 שעות לאחר מכן?*\n_(אופציונלי — עוזר לזהות דפוסים עם הזמן)_",
-    {
-      parse_mode: "Markdown",
-      ...Markup.inlineKeyboard([
-        [
-          Markup.button.callback("✅ רגיל", "symptom_ok"),
-          Markup.button.callback("🫃 נפיחות", "symptom_bloating"),
-        ],
-        [
-          Markup.button.callback("🔥 צרבת", "symptom_heartburn"),
-          Markup.button.callback("😴 עייפות", "symptom_fatigue"),
-        ],
-        [
-          Markup.button.callback("✏️ אחר", "symptom_other"),
-          Markup.button.callback("⏭️ דלג", "symptom_skip"),
-        ],
-      ]),
-    }
-  );
 }
 
 export async function logCommand(ctx: Context): Promise<void> {

@@ -3,7 +3,7 @@ import path from "path";
 dotenv.config({ path: path.resolve(process.cwd(), ".env"), override: true });
 import { Telegraf, Scenes, session } from "telegraf";
 import { onboardingScene } from "./scenes/onboarding";
-import { logCommand, handleFoodLog, sendSymptomsPrompt } from "./commands/log";
+import { logCommand, handleFoodLog } from "./commands/log";
 import { summaryCommand } from "./commands/summary";
 import { planCommand, handlePlanRefinement } from "./commands/plan";
 import {
@@ -274,7 +274,6 @@ bot.on("text", async (ctx) => {
   const loggedAt = await handleFoodLog(ctx, text);
   if (loggedAt) {
     pendingSymptomsFeedback.set(telegramId, loggedAt);
-    await sendSymptomsPrompt(ctx);
   }
 });
 
