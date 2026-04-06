@@ -1,9 +1,10 @@
 import { Context, Markup } from "telegraf";
 import { parseFoodLog } from "../claude";
-import { appendMealLog, getUser } from "../db";
+import { appendMealLog, getUser, getMealLogsForDay, getToday } from "../db";
 import {
   formatLoggedMeals,
   formatHighCalorieWarning,
+  formatDailySummary,
 } from "../utils/formatters";
 import { MealEntry } from "../types";
 
@@ -48,14 +49,17 @@ export async function handleFoodLog(ctx: Context, userMessage: string): Promise<
     appendMealLog(telegramId, entry);
   }
 
-  // Format and send response
+  // Send confirmation for just-logged entries
   const formattedText = formatLoggedMeals(entries);
+  await ctx.reply(formattedText, { parse_mode: "Markdown" });
 
-  await ctx.reply(formattedText, {
+  // Send running daily summary as a separate message
+  const updatedLog = getMealLogsForDay(telegramId, getToday());
+  const dailySummaryText = formatDailySummary(user, updatedLog);
+  await ctx.reply(dailySummaryText, {
     parse_mode: "Markdown",
     ...Markup.inlineKeyboard([
       [
-        Markup.button.callback("📊 סיכום יומי", "show_summary"),
         Markup.button.callback("🍽️ תכנן המשך יום", "show_plan"),
       ],
     ]),
