@@ -3,7 +3,7 @@ import path from "path";
 dotenv.config({ path: path.resolve(process.cwd(), ".env"), override: true });
 import { Telegraf, Scenes, session } from "telegraf";
 import { onboardingScene } from "./scenes/onboarding";
-import { logCommand, handleFoodLog, pendingSymptomTimestamp } from "./commands/log";
+import { logCommand, handleFoodLog } from "./commands/log";
 import { summaryCommand } from "./commands/summary";
 import { planCommand, handlePlanRefinement } from "./commands/plan";
 import {
@@ -151,16 +151,14 @@ bot.action(/^symptom_/, async (ctx) => {
   if (!telegramId) return;
 
   const data = (ctx.callbackQuery as any).data as string;
-  const symptom = symptomKeyMap[data];
-  if (!symptom) return;
+  // callback_data format: "symptom_<key>|<loggedAt timestamp>"
+  const pipeIdx = data.indexOf("|");
+  const key = pipeIdx !== -1 ? data.slice(0, pipeIdx) : data;
+  const loggedAt = pipeIdx !== -1 ? data.slice(pipeIdx + 1) : "";
 
-  const loggedAt = pendingSymptomTimestamp.get(telegramId);
-  if (!loggedAt) {
-    await ctx.answerCbQuery("לא מצאתי ארוחה לעדכון.");
-    return;
-  }
+  const symptom = symptomKeyMap[key];
+  if (!symptom || !loggedAt) return;
 
-  pendingSymptomTimestamp.delete(telegramId);
   updateMealSymptomByLoggedAt(telegramId, loggedAt, symptom);
 
   const emojiMap: Record<MealSymptom, string> = {
