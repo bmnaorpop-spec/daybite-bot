@@ -318,6 +318,20 @@ export function updateMealSymptomByLoggedAt(
   }
 }
 
+export function removeMealByLoggedAt(telegramId: number, loggedAt: string): void {
+  db.prepare("DELETE FROM meal_logs WHERE telegramId = ? AND loggedAt = ?").run(telegramId, loggedAt);
+
+  const row = db.prepare("SELECT currentDayLog FROM users WHERE telegramId = ?").get(telegramId) as any;
+  if (row) {
+    const log: MealEntry[] = JSON.parse(row.currentDayLog || "[]");
+    const updated = log.filter((e) => e.loggedAt !== loggedAt);
+    db.prepare("UPDATE users SET currentDayLog = ? WHERE telegramId = ?").run(
+      JSON.stringify(updated),
+      telegramId
+    );
+  }
+}
+
 export function resetDayLog(telegramId: number): void {
   const today = getToday();
   db.prepare(

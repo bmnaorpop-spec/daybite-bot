@@ -13,6 +13,7 @@ import {
   getEditingState,
 } from "./commands/settings";
 import { resetCommand, handleResetCallback } from "./commands/reset";
+import { removeCommand, handleRemoveMealCallback } from "./commands/remove";
 import { helpCommand } from "./commands/help";
 import { closeDb, getUser, updateMealSymptomByLoggedAt } from "./db";
 import { MealSymptom } from "./types";
@@ -89,6 +90,10 @@ bot.command("הגדרות", async (ctx) => await settingsCommand(ctx));
 bot.command("reset", async (ctx) => await resetCommand(ctx));
 bot.command("איפוס", async (ctx) => await resetCommand(ctx));
 
+// /remove and /הסר
+bot.command("remove", async (ctx) => await removeCommand(ctx));
+bot.command("הסר", async (ctx) => await removeCommand(ctx));
+
 // /help and /עזרה
 bot.command("help", async (ctx) => await helpCommand(ctx));
 bot.command("עזרה", async (ctx) => await helpCommand(ctx));
@@ -135,6 +140,13 @@ bot.action("save_plan", async (ctx) => {
 bot.action("replan", async (ctx) => {
   await ctx.answerCbQuery();
   await planCommand(ctx);
+});
+
+// Remove meal callbacks
+bot.action(/^remove_meal\|/, async (ctx) => {
+  const data = (ctx.callbackQuery as any).data as string;
+  const loggedAt = data.slice("remove_meal|".length);
+  await handleRemoveMealCallback(ctx, loggedAt);
 });
 
 // Symptom tracking callbacks
