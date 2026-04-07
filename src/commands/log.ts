@@ -1,15 +1,12 @@
 import { Context, Markup } from "telegraf";
 import { parseFoodLog } from "../claude";
-import { appendMealLog, getUser } from "../db";
+import { appendMealLog, getUser, getMealLogsForDay, getToday } from "../db";
 import {
   formatLoggedMeals,
   formatHighCalorieWarning,
 } from "../utils/formatters";
 import { MealEntry } from "../types";
 
-// Maps telegramId → loggedAt timestamp of the last batch, so the symptom
-// callback can find the right rows to update.
-export const pendingSymptomTimestamp = new Map<number, string>();
 
 export async function handleFoodLog(ctx: Context, userMessage: string): Promise<void> {
   const telegramId = ctx.from?.id;
@@ -53,7 +50,21 @@ export async function handleFoodLog(ctx: Context, userMessage: string): Promise<
   }
 
   // Format and send response
-  const formattedText = formatLoggedMeals(entries);
+  let formattedText = formatLoggedMeals(entries);
+
+  // Append daily calorie summary line
+  const updatedLog = getMealLogsForDay(telegramId, getToday());
+  const totalCaloriesToday = updatedLog.reduce((sum, e) => sum + e.calories, 0);
+  if (user.dietType === "caloric_balance" && user.calorieGoal) {
+    const remaining = user.calorieGoal - totalCaloriesToday;
+    if (remaining > 0) {
+      formattedText += `\n\n📊 נשארו לך *${Math.round(remaining)} קק״ל* מתוך יעד ${user.calorieGoal} היום`;
+    } else {
+      formattedText += `\n\n⚠️ חרגת מהיעד היומי ב-*${Math.round(Math.abs(remaining))} קק״ל*`;
+    }
+  } else {
+    formattedText += `\n\n📊 סה״כ היום: *${Math.round(totalCaloriesToday)} קק״ל*`;
+  }
 
   await ctx.reply(formattedText, {
     parse_mode: "Markdown",
@@ -72,9 +83,10 @@ export async function handleFoodLog(ctx: Context, userMessage: string): Promise<
     });
   }
 
-  // Ask how the user felt after eating (symptom tracking)
-  const batchTimestamp = entries[0].loggedAt;
-  pendingSymptomTimestamp.set(telegramId, batchTimestamp);
+  // Ask how the user felt after eating (symptom tracking).
+  // The loggedAt timestamp is embedded in the callback_data so the handler
+  // doesn't rely on any in-memory state (survives bot restarts / PM2 reloads).
+  const ts = entries[0].loggedAt;
 
   await ctx.reply(
     "🌡️ *איך הרגשת 1–2 שעות אחרי הארוחה?*\n_(ניתן לדלג — פשוט התעלם מהשאלה)_",
@@ -82,14 +94,14 @@ export async function handleFoodLog(ctx: Context, userMessage: string): Promise<
       parse_mode: "Markdown",
       ...Markup.inlineKeyboard([
         [
-          Markup.button.callback("✅ רגיל", "symptom_normal"),
-          Markup.button.callback("😮‍💨 נפיחות", "symptom_bloating"),
+          Markup.button.callback("✅ רגיל",        `symptom_normal|${ts}`),
+          Markup.button.callback("😮‍💨 נפיחות", `symptom_bloating|${ts}`),
         ],
         [
-          Markup.button.callback("🔥 צרבת", "symptom_heartburn"),
-          Markup.button.callback("😴 עייפות", "symptom_fatigue"),
+          Markup.button.callback("🔥 צרבת",        `symptom_heartburn|${ts}`),
+          Markup.button.callback("😴 עייפות",      `symptom_fatigue|${ts}`),
         ],
-        [Markup.button.callback("🔸 אחר", "symptom_other")],
+        [Markup.button.callback("🔸 אחר",          `symptom_other|${ts}`)],
       ]),
     }
   );
