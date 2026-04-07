@@ -254,6 +254,13 @@ bot.on("text", async (ctx) => {
     if (handled) return;
   }
 
+  // Detect remove-meal intent
+  const removeMealIntent = /הסר|מחק|תמחק|remove/i;
+  if (removeMealIntent.test(text)) {
+    await removeCommand(ctx);
+    return;
+  }
+
   // Check if user is refining a meal plan
   if (awaitingPlanRefinement.has(telegramId)) {
     awaitingPlanRefinement.delete(telegramId);
